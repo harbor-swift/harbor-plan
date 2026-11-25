@@ -4,7 +4,7 @@ An example Swift backend: people register with an email address and a password, 
 link the system emails them, sign in for an access token and a refresh token, and read their own user.
 Two services own the data — **Auth** (accounts, credentials, verification, sessions, token signing) and
 **Users** (users and their display names) — behind one public REST **gateway**. Built to
-swift-microservices-architect 1.7.1.
+swift-microservices-architect 1.10.0.
 
 ## Services
 
@@ -107,7 +107,8 @@ None.
 - **Refresh tokens rotate with reuse detection**: a used refresh token presented again ends its whole session.
 - **The verification email retries until it lands.** A person waits on it, and a run that gave up would leave the account pending with nothing left to expire it, so `RegistrationWorkflow` sends under the `delivery` options, with no attempt limit, and a provider that stays down shows on the failing-activity alert. Each attempt stores a new token, so a retry after an attempt that did deliver sends a second email whose link replaces the first: the secret stays out of the workflow's history.
 - **No `health` subcommand (departure).** grpc-swift-extras keeps its health client `package`-scoped, so a probe command would need the health proto in harbor-protos. Left out of this example.
-- **Warnings in swift-temporal-sdk's `@Workflow` (departure).** swift-temporal-sdk 1.5.0, the latest release, expands `@Workflow` to `nonisolated(unsafe)` state not marked `unsafe`, which warns under strict memory safety, so harbor-auth's warnings-as-errors build fails. Warnings and warnings-as-errors stay on; this leaves when a release of the SDK fixes it.
+- **Warnings in swift-temporal-sdk's `@Workflow` (departure).** swift-temporal-sdk 1.5.0, the latest release, expands `@Workflow` through `@_WorkflowState` to `nonisolated(unsafe)` state not marked `unsafe`, which warns "expression uses unsafe constructs but is not marked with 'unsafe'" (`StrictMemorySafety`) three times in the expansion for `RegistrationWorkflow.isEmailVerified`, so harbor-auth's warnings-as-errors build (`scripts/swift_ci.sh`) fails there and nowhere else. Warnings and warnings-as-errors stay on in `Package.swift`; this leaves in the change that raises swift-temporal-sdk to a release without the warning.
+- **No CI/CD or images yet (departure).** No package has CI workflows, a `.license_header_template`, `.licenseignore`, `dependabot.yml`, or, for a service, a `Containerfile`, though Build order's first four lines are ticked: the platform, the image registry and the CI host are unanswered (see Questions), and the CI workflows' deploy jobs and image settings depend on them. Until then each change is held by hand to `scripts/swift_ci.sh build` and `test` (`--library` for harbor-core and harbor-protos), `scripts/check_boundaries.sh`, `scripts/check_style.sh` and `swift-format lint --strict`. Once they're answered, each package runs Set up CI/CD, with `linux_host_archs: '["aarch64"]'`.
 - **No `XPostgresTests` yet (departure).** The repositories and statements are untested against a real Postgres; the end-to-end demo covers them.
 - **The email address is unique and shared.** Registration answers `409` for a registered address, which reveals it is registered, as the skill accepts for one-step sign-up.
 
@@ -115,11 +116,13 @@ None.
 
 Production environments are out of scope for this example; `harbor-dev/` runs everything on one machine. These are the answers it runs on:
 
-- Each service's Postgres instance: Postgres 18; roles log in with passwords mounted as files; TLS `prefer` on the client, `hostssl … scram-sha-256` on the server; default `max_connections` (100), each role's pool 10.
+- Each service's Postgres instance: Postgres 18; roles log in with passwords mounted as files; TLS `prefer` on the client, `hostssl … scram-sha-256` on the server; default `max_connections` (100), each role's pool 10. Only its own service's database is on each instance, so each sizes against its own: Auth's `auth_service` pools in serve and the worker, one replica each, total 20; Users' `users_service` and `users_internal` pools in serve, one replica, total 20; each leaves room for `migrate`'s owner pool and administration.
+- Stop timeout: the worker's `temporal.worker.gracefulShutdownPeriodSeconds` is 30, so whatever stops `auth worker run` waits longer than 30 seconds.
 - How each process connects to Temporal: self-hosted frontend over mutual TLS, a pair per process (`auth`, `auth-worker`) signed by the environment's authority; namespace `harbor-auth`.
 - Each environment's certificate authority: a development authority per machine, made by `harbor-dev/certs.sh`.
 - How a developer runs Postgres, Valkey and Temporal: Apple `container` — one Postgres per service, `temporalio/auto-setup` 1.29.7 over its own Postgres store, Temporal's UI; no Valkey. The Swift processes run natively.
 - Backups, point-in-time recovery, retention and Temporal's authorizer: unanswered (see Questions).
+- The platform each environment deploys to, its servers' CPU architectures, the image registry and the CI host: a developer's machine runs harbor-dev on macOS (arm64); servers run `aarch64` (the user's answer); the platform, the image registry and the CI host are unanswered, with no default (see Questions).
 
 Runbooks:
 
@@ -149,3 +152,5 @@ Runbooks:
 - Email provider for production: unanswered; `AuthLog` stands in.
 - Backups and point-in-time recovery of each Postgres and Temporal's store, the namespace's retention, and whether Temporal's authorizer confines each identity to its namespace: unanswered.
 - Production's certificate authority, objectives and alerts: unanswered (Prepare for production).
+- The servers' CPU architecture. **Answered**: `aarch64`.
+- The platform each environment deploys to, the image registry and the CI host: unanswered, with no default. Until they're answered, no package has CI/CD or an image (see Decisions).
